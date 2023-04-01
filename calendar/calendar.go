@@ -21,7 +21,7 @@ func firstMonthDay(dt time.Time) time.Time {
 
 func lastMonthDay(dt time.Time) time.Time {
 	month := dt.Month()
-	for dt.Month() == month {
+	for dt.Add(oneDay).Month() == month {
 		dt = dt.Add(oneDay)
 	}
 	return dt
