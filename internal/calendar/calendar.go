@@ -3,13 +3,15 @@ package calendar
 import (
 	"fmt"
 	"time"
+	"strings"
 )
 
 const (
 	oneDay       = 24 * time.Hour
 	headerFormat = "January 2006"
-	weekdaysLine = "Mo Di Mi Do Fr Sa So"
 )
+
+var Weekdays = [7]string{"Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"}
 
 func firstMonthDay(dt time.Time) time.Time {
 	month := dt.Month()
@@ -49,7 +51,7 @@ func GetCalendarText(t time.Time) []string {
 	lines := []string{}
 	space := "   "
 	lines = append(lines, space+t.Format(headerFormat))
-	lines = append(lines, weekdaysLine)
+	lines = append(lines, strings.Join(Weekdays[:], " "))
 	line := ""
 	for _, dt := range iterDays(firstDay, lastDay) {
 		if dt.Month() == month {

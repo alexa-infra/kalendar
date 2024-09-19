@@ -1,40 +1,30 @@
 package main
 
 import (
-	"time"
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
-	"image/png"
 	_ "image/jpeg"
+	"image/png"
 	"io/ioutil"
-	"log"
 	"math"
 	"os"
+	"time"
 
 	"github.com/golang/freetype/truetype"
 	"golang.org/x/image/font"
 	"golang.org/x/image/math/fixed"
 
-	"github.com/alexa-infra/kalendar/calendar"
+	"github.com/alexa-infra/kalendar/internal/calendar"
+	. "github.com/alexa-infra/kalendar/internal/context"
 )
 
-var (
-	imgfile = flag.String("imgfile", "infile.jpeg", "filename of the image")
-	dpi      = flag.Float64("dpi", 72, "screen resolution in Dots Per Inch")
-	fontfile = flag.String("fontfile", "RobotoMono-SemiBold.ttf", "filename of the ttf font")
-	hinting  = flag.String("hinting", "none", "none | full")
-	fontsize     = flag.Float64("size", 12, "font size in points")
-	spacing  = flag.Float64("spacing", 1.5, "line spacing (e.g. 2 means double spaced)")
-	wonb     = flag.Bool("whiteonblack", false, "white text on a black background")
-	weekdays = []string{"Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"}
-)
-
-func measureCell(drawer *font.Drawer, days []calendar.CalendarDay) image.Point {
-	lineSize := int(math.Ceil(*fontsize * *spacing * *dpi / 72))
+func measureCell(cfg config, drawer *font.Drawer, days []calendar.CalendarDay) image.Point {
+	lineSize := cfg.lineHeight()
 	maxLength := 0
 	for _, day := range days {
 		length := drawer.MeasureString(day.Format("2")).Round()
@@ -42,7 +32,7 @@ func measureCell(drawer *font.Drawer, days []calendar.CalendarDay) image.Point {
 			maxLength = length
 		}
 	}
-	for _, dayName := range weekdays {
+	for _, dayName := range calendar.Weekdays {
 		length := drawer.MeasureString(dayName).Round()
 		if length > maxLength {
 			maxLength = length
@@ -53,21 +43,29 @@ func measureCell(drawer *font.Drawer, days []calendar.CalendarDay) image.Point {
 	return image.Pt(maxLength, lineSize)
 }
 
-func measureCalendar(drawer *font.Drawer, days []calendar.CalendarDay) image.Point {
-	lineHeight := int(math.Ceil(*fontsize * *spacing * *dpi / 72))
-	firstLineHeight := int(math.Ceil(*fontsize * *dpi / 72))
-	cellSize := measureCell(drawer, days)
-	numLines := len(days) / 7 + 2
+func measureCalendar(cfg config, drawer *font.Drawer, days []calendar.CalendarDay) image.Point {
+	lineHeight := cfg.lineHeight()
+	firstLineHeight := cfg.lineHeightNoSpacing()
+	cellSize := measureCell(cfg, drawer, days)
+	numLines := len(days)/7 + 2
 	w := cellSize.X * 7
-	h := firstLineHeight + (numLines - 1) * lineHeight
+	h := firstLineHeight + (numLines-1)*lineHeight
 	return image.Pt(w, h)
 }
 
-func render(drawer *font.Drawer, days []calendar.CalendarDay, today time.Time, at image.Point) {
-	lineHeight := int(math.Ceil(*fontsize * *spacing * *dpi / 72))
-	firstLineHeight := int(math.Ceil(*fontsize * *dpi / 72))
-	cellSize := measureCell(drawer, days)
-	calSize := measureCalendar(drawer, days)
+func (cfg config) lineHeight() int {
+	return int(math.Ceil(cfg.fontsize * cfg.spacing * cfg.dpi / 72))
+}
+
+func (cfg config) lineHeightNoSpacing() int {
+	return int(math.Ceil(cfg.fontsize * cfg.dpi / 72))
+}
+
+func render(cfg config, drawer *font.Drawer, days []calendar.CalendarDay, today time.Time, at image.Point) {
+	lineHeight := cfg.lineHeight()
+	firstLineHeight := cfg.lineHeightNoSpacing()
+	cellSize := measureCell(cfg, drawer, days)
+	calSize := measureCalendar(cfg, drawer, days)
 
 	x, y := at.X, at.Y
 	dy := lineHeight
@@ -75,21 +73,21 @@ func render(drawer *font.Drawer, days []calendar.CalendarDay, today time.Time, a
 	y += firstLineHeight
 	headerText := today.Format("January 2006")
 	headerLength := drawer.MeasureString(headerText).Round()
-	drawer.Dot = fixed.P(x + int((calSize.X - headerLength) / 2), y)
+	drawer.Dot = fixed.P(x+int((calSize.X-headerLength)/2), y)
 	drawer.DrawString(headerText)
 	y += dy
 	x = at.X
-	for _, dayName := range weekdays {
+	for _, dayName := range calendar.Weekdays {
 		length := drawer.MeasureString(dayName).Round()
 		diff := cellSize.X - length
-		drawer.Dot = fixed.P(x + diff, y)
+		drawer.Dot = fixed.P(x+diff, y)
 		drawer.DrawString(dayName)
 		x += dx
 	}
 	y += dy
 	x = at.X
 	for i, day := range days {
-		if i != 0 && i % 7 == 0 {
+		if i != 0 && i%7 == 0 {
 			y += dy
 			x = at.X
 		}
@@ -97,7 +95,7 @@ func render(drawer *font.Drawer, days []calendar.CalendarDay, today time.Time, a
 			text := day.Format("2")
 			length := drawer.MeasureString(text).Round()
 			diff := cellSize.X - length
-			drawer.Dot = fixed.P(x + diff, y)
+			drawer.Dot = fixed.P(x+diff, y)
 			drawer.DrawString(text)
 		}
 		x += dx
@@ -105,7 +103,7 @@ func render(drawer *font.Drawer, days []calendar.CalendarDay, today time.Time, a
 }
 
 func openImageFile(filename string) (image.Image, error) {
-	inFile, err := os.Open(*imgfile)
+	inFile, err := os.Open(filename)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +115,7 @@ func openImageFile(filename string) (image.Image, error) {
 	}
 	if format != "jpeg" && format != "png" {
 		e := fmt.Errorf("error in image format - not jpeg")
-                return nil, e
+		return nil, e
 	}
 	return img, nil
 }
@@ -144,18 +142,19 @@ func writeImageFile(filename string, rgba *image.RGBA) error {
 	buf := bufio.NewWriter(outFile)
 	err = png.Encode(buf, rgba)
 	if err != nil {
-		return fmt.Errorf("error in parsing truetype: %w", err)
+		return fmt.Errorf("error in encoding png: %w", err)
 	}
 	err = buf.Flush()
 	if err != nil {
 		return err
 	}
+	fmt.Printf("Wrote %s OK.\n", filename)
 	return nil
 }
 
-func createDrawer(rgba *image.RGBA, tfont *truetype.Font, fg image.Image) *font.Drawer {
+func createDrawer(cfg config, rgba *image.RGBA, tfont *truetype.Font, fg image.Image) *font.Drawer {
 	h := font.HintingNone
-	switch *hinting {
+	switch cfg.hinting {
 	case "full":
 		h = font.HintingFull
 	}
@@ -163,57 +162,96 @@ func createDrawer(rgba *image.RGBA, tfont *truetype.Font, fg image.Image) *font.
 		Dst: rgba,
 		Src: fg,
 		Face: truetype.NewFace(tfont, &truetype.Options{
-			Size:    *fontsize,
-			DPI:     *dpi,
+			Size:    cfg.fontsize,
+			DPI:     cfg.dpi,
 			Hinting: h,
 		}),
 	}
 }
 
 func main() {
-	flag.Parse()
+	err := run(context.Background())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(1)
+	}
+}
+
+type config struct {
+	imgfile  string
+	dpi      float64
+	fontfile string
+	hinting  string
+	fontsize float64
+	spacing  float64
+	wonb     bool
+	outfile  string
+}
+
+func parseConfig(ctx context.Context) (config, error) {
+	stderr := GetContextStderr(ctx)
+	args := GetContextArgs(ctx)
+
+	flagSet := flag.NewFlagSet(args[0], flag.ContinueOnError)
+	imgfile := flagSet.String("imgfile", "infile.jpeg", "filename of the image")
+	outfile := flagSet.String("outfile", "out.png", "output filename")
+	dpi := flagSet.Float64("dpi", 72, "screen resolution in Dots Per Inch")
+	fontfile := flagSet.String("fontfile", "RobotoMono-SemiBold.ttf", "filename of the ttf font")
+	hinting := flagSet.String("hinting", "none", "none | full")
+	fontsize := flagSet.Float64("size", 12, "font size in points")
+	spacing := flagSet.Float64("spacing", 1.5, "line spacing (e.g. 2 means double spaced)")
+	wonb := flagSet.Bool("whiteonblack", false, "white text on a black background")
+	flagSet.SetOutput(stderr)
+	err := flagSet.Parse(args[1:])
+	if err != nil {
+		return config{}, err
+	}
+	return config{*imgfile, *dpi, *fontfile, *hinting, *fontsize, *spacing, *wonb, *outfile}, nil
+}
+
+func run(ctx context.Context) error {
+	cfg, err := parseConfig(ctx)
+	if err != nil {
+		return err
+	}
 
 	// Read the font data.
-	f, err := openFontFile(*fontfile)
+	f, err := openFontFile(cfg.fontfile)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	// Read the image
-	img, err := openImageFile(*imgfile)
+	img, err := openImageFile(cfg.imgfile)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	// Copy the image data
 	rect := img.Bounds()
 	rgba := image.NewRGBA(rect)
-	draw.Draw(rgba, rgba.Bounds(), img, rect.Min, draw.Src) 
+	draw.Draw(rgba, rgba.Bounds(), img, rect.Min, draw.Src)
 
 	// Create the drawer
 	fg, bg := image.Black, &image.Uniform{color.RGBA{255, 255, 255, 125}}
-	if *wonb {
+	if cfg.wonb {
 		fg, bg = image.White, &image.Uniform{color.RGBA{0, 0, 0, 125}}
 	}
-	drawer := createDrawer(rgba, f, fg)
+	drawer := createDrawer(cfg, rgba, f, fg)
 
 	// Create calendar data
 	today := time.Now()
 	days := calendar.GetCalendar(today)
-	calSize := measureCalendar(drawer, days)
+	calSize := measureCalendar(cfg, drawer, days)
 	padding := image.Pt(20, 20)
-	rr := image.Rectangle{ rect.Max.Sub(calSize).Sub(padding.Mul(2)), rect.Max.Sub(padding) }
+	rr := image.Rectangle{rect.Max.Sub(calSize).Sub(padding.Mul(2)), rect.Max.Sub(padding)}
 
 	// Draw background
 	draw.Draw(rgba, rr, bg, image.ZP, draw.Over)
 
 	// Draw calendar
-	render(drawer, days, today, rr.Min)
+	render(cfg, drawer, days, today, rr.Min)
 
 	// Save that RGBA image to disk.
-	err = writeImageFile("out.png", rgba)
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Println("Wrote out.png OK.")
+	return writeImageFile(cfg.outfile, rgba)
 }
